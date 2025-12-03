@@ -18,10 +18,10 @@ NOTES
 
 MAGNET_CONFIG = {
     'height' : 0.1, #m
-    'min_side_length' : 0.1, #m
-    'max_side_length' : 25, #m
-    'min_M' : 1, #T
-    'max_M' : 15, #T
+    'dim_min' : 0.1, #m
+    'dim_min' : 5, #m
+    'P_min' : 0.2, #T
+    'P_max' : 1.48, #T
 }
 
 #area of interest -- area containing desired magnetic field
@@ -62,6 +62,7 @@ TRAINING_CONFIG = {
 }
 
 #data normalisation ranges
+'''
 NORMALIZATION = {
     'x': (MAGNET_CONFIG['position_x_min'], MAGNET_CONFIG['position_x_max']),
     'y': (MAGNET_CONFIG['position_y_min'], MAGNET_CONFIG['position_y_max']),
@@ -69,5 +70,6 @@ NORMALIZATION = {
     'Mx': (-1.0, 1.0),  #(|M| - 0.5) * cos(phi)
     'My': (-1.0, 1.0),  #(|M| - 0.5) * sin(phi)
 }
+'''
 
 RANDOM_SEED = 42
