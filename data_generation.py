@@ -22,6 +22,7 @@ class CuboidDataGenerator:
         self.magnets = np.zeros((config.TRAINING_CONFIG['dataset_size'], 6))  #x, y, a, b, Mx, My
 
     def generate_magnets(self):
+        #---generate magpy magnet collection---
         pbar = tqdm(total=config.TRAINING_CONFIG['dataset_size'], desc="Creating magnets", unit="magnet")
         sampler = qmc.LatinHypercube(d=6)
         samples = sampler.random(n=config.TRAINING_CONFIG['dataset_size'])
@@ -33,17 +34,38 @@ class CuboidDataGenerator:
         Mx_samples = qmc.scale(samples[:,4:5], config.MAGNET_CONFIG['M_min'], config.MAGNET_CONFIG['M_max']).flatten()
         My_samples = qmc.scale(samples[:, 5:6], config.MAGNET_CONFIG['M_min'], config.MAGNET_CONFIG['M_max']).flatten()
 
-        test_magnet = magpy.magnet.Cuboid(polarization = (0,0,0), dimension = (1,1,1))
-        sensor = magpy.Sensor()
-        magnets = magpy.Collection(sensor)
-        for i in numba.prange(config.TRAINING_CONFIG['dataset_size']):
+        magnets = []
+        for i in range(config.TRAINING_CONFIG['dataset_size']):
             magnet = magpy.magnet.Cuboid(polarization=(Mx_samples[i], My_samples[i], 0),
                                          dimension=(a_samples[i], b_samples[i], 1),
                                          position=(x_samples[i], y_samples[i], 0))
-            magnets.add(magnet)
+            magnets.append(magnet)
             pbar.update(1)
         pbar.close()
 
+        #---generate AOI points---
+        x = np.arange(-config.AOI_CONFIG['x_dim'] / 2,
+                    config.AOI_CONFIG['x_dim'] / 2 + config.AOI_CONFIG['resolution'],
+                    config.AOI_CONFIG['resolution'])
+
+        y = np.arange(-config.AOI_CONFIG['y_dim'] / 2,
+                      config.AOI_CONFIG['y_dim'] / 2 + config.AOI_CONFIG['resolution'],
+                      config.AOI_CONFIG['resolution'])
+
+        X, Y = np.meshgrid(x, y)
+        Z = np.zeros_like(X)
+
+        points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+
+        #---calculate magnetic field at each AOI point
+        pbar = tqdm(total = config.TRAINING_CONFIG['dataset_size'], desc='Calculating H fields')
+        H = np.zeros((config.TRAINING_CONFIG['dataset_size'], #number of magnets
+                      points.shape[0], #number of points
+                      2)) #Hx, Hy
+        for i in range( config.TRAINING_CONFIG['dataset_size'] ):
+            H[i] = magpy.getH(magnets[i], points)[:, :2]  #only store Hx, Hy
+            pbar.update(1)
+        pbar.close()
 
     #def generate_fields(self, magnets):
 
