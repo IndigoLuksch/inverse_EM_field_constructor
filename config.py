@@ -19,17 +19,15 @@ NOTES
 MAGNET_CONFIG = {
     'height' : 0.1, #m
     'dim_min' : 0.1, #m
-    'dim_min' : 5, #m
-    'P_min' : 0.2, #T
-    'P_max' : 1.48, #T
+    'dim_max' : 5, #m
+    'M_min' : 0.2, #T
+    'M_max' : 1.48, #T
 }
 
 #area of interest -- area containing desired magnetic field
 AOI_CONFIG = {
-    'x_start' : 0, #m
-    'x_end' : 30, #m
-    'y_start' : 0, #m
-    'y_end' : 30, #m
+    'x_dim' : 30, #m
+    'y_dim' : 30 #m
 }
 
 '''

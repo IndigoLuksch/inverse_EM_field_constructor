@@ -1,0 +1,11 @@
+tensorflow
+magpylib
+numpy
+tqdm
+scipy
+random
+numba
+matplotlib
+plotly
+time
+#https://www.tensorflow.org/api_docs/python/tf/keras/applications/resnet50
