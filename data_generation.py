@@ -69,7 +69,7 @@ class CuboidDataGenerator:
                           points.shape[0],  # number of points
                           2))  # Hx, Hy
             for i in range(batch_end-batch_start):
-                H[i] = magpy.getH(magnets[i], points)[:, :2]  #only store Hx, Hy
+                H_batch[i] = magpy.getH(magnets[i], points)[:, :2]  #only store Hx, Hy
                 pbar.update(1)
             if batch_start == 0:
                 np.savez('generated_data.npz', H=H_batch, magnets=magnets, points=points)
