@@ -1,4 +1,4 @@
-tensorflow
+tensorflow.keras.application.resnet50
 magpylib
 numpy
 tqdm
