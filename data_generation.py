@@ -2,7 +2,6 @@ import numpy as np
 from tqdm import tqdm
 import magpylib as magpy
 import random
-import math
 from scipy.stats import qmc
 import time
 import config
@@ -60,31 +59,24 @@ class CuboidDataGenerator:
 
         points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
 
-        #---calculate magnetic field at each AOI point
-        pbar = tqdm(total = math.ceil(config.TRAINING_CONFIG['dataset_size']/batch_size), desc='Calculating H fields', unit='batch')
+        #---save metadata---
+        np.savez('data/metadata.npz', magnets=magnets, points=points)
 
-        for batch_start in range(0, config.TRAINING_CONFIG['dataset_size'], batch_size):
-            batch_end = min(batch_start + batch_size, config.TRAINING_CONFIG['dataset_size'])
-            H_batch = np.zeros((batch_end-batch_start,  # number of magnets
-                          points.shape[0],  # number of points
-                          2))  # Hx, Hy
-            for i in range(batch_end-batch_start):
-                H_batch[i] = magpy.getH(magnets[i], points)[:, :2]  #only store Hx, Hy
-            if batch_start == 0:
-                np.savez('generated_data.npz', H=H_batch, magnets=magnets, points=points)
-            else:
-                data = np.load('generated_data.npz')
-                H_cumulative = np.concatenate( [ data['H'], H_batch ] )
-                np.savez('generated_data.npz', H=H_cumulative, magnets=magnets, points=points)
+        #---calculate magnetic field at each AOI point; save in batches to avoid memory overload
+        pbar = tqdm(total = config.TRAINING_CONFIG['dataset_size'], desc='Calculating H fields')
+
+        for i in range(config.TRAINING_CONFIG['dataset_size']):
+            H_single = magpy.getH(magnets[i], points)[:, :2]  #only store Hx, Hy
+            np.save(f'data/H_{i:06d}.npy', H_single) #save, padded with zeros to 6 s.f.
             pbar.update(1)
         pbar.close()
 
         #store as instance variables
-        data = np.load('generated_data.npz')
-        H = data['H']
-        self.magnets = magnets
-        self.H = H
-        self.points = points
+        # data = np.load('generated_data.npz')
+        # H = data['H']
+        # self.magnets = magnets
+        # self.H = H
+        # self.points = points
 
     def visualize_random_sample(self):
         '''
@@ -96,13 +88,17 @@ class CuboidDataGenerator:
         • Magnet position and dimensions as a rectangle
         • Magnetization vector as an arrow
         '''
-        if self.magnets is None or self.H is None:
-            raise ValueError("No data to visualize. Run generate_magnets() first.")
+        if self.magnets is None:
+            metadata = np.load('data/metadata.npz', allow_pickle=True)
+            self.magnets = metadata['magnets']
+            self.points = metadata['points']
 
-        #select random sample
+            # Select random sample
         idx = random.randint(0, len(self.magnets) - 1)
         magnet = self.magnets[idx]
-        H_sample = self.H[idx]
+
+        # Load the corresponding H field
+        H_sample = np.load(f'data/H_{idx:06d}.npy')
 
         #get magnet properties
         pos = magnet.position
@@ -172,5 +168,6 @@ class CuboidDataGenerator:
 
 if __name__ == '__main__':
     generator = CuboidDataGenerator()
-    generator.generate_data(1000)
+    #generator.generate_data(1000)
     generator.visualize_random_sample()
+
