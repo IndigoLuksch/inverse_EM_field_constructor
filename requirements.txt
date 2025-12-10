@@ -5,3 +5,4 @@ magpylib
 scipy
 google-cloud-storage
 matplotlib
+scikit-learn

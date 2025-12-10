@@ -10,7 +10,9 @@ import model as Model
 print('Generating data')
 generator = data.Dataset()
 generator.setup_gcloud()
-generator.generate_cubiod_data(samples_per_batch=1000)
+generator.generate_cubiod_data()
 
 #---create, train model---
 model = Model.create_model()
+
+print("Script complete")

@@ -29,7 +29,7 @@ class Dataset:
         self.points = None
         self.num_points = None
         self.local_path = 'tfrecords'
-        self.gcs_path = 'tfrecords'
+        self.gcs_path = 'gs://inverse-em-bucket/tfrecords'
         self.bucket = None
 
     def setup_gcloud(self):
@@ -55,8 +55,7 @@ class Dataset:
         example = tf.train.Example(features=tf.train.Features(feature=feature))
         return example.SerializeToString()
 
-    @staticmethod
-    def deserialise_example(serialised_example):
+    def deserialise_example(self, serialised_example):
         '''parse single tfrecord to tensor'''
 
         feature = {
@@ -72,7 +71,7 @@ class Dataset:
 
         return H, params
 
-    def generate_cubiod_data(self, num_batches=10): #cuboid-shaped magnets
+    def generate_cubiod_data(self, num_batches=1000): #cuboid-shaped magnets
         #---generate magpy magnet collection---
         sampler = qmc.LatinHypercube(d=6)
         samples = sampler.random(n=config.DATASET_CONFIG['dataset_size'])
@@ -155,7 +154,6 @@ class Dataset:
                 self.upload_to_gcloud(local_fullpath, gcs_fullpath)
                 os.remove(local_fullpath)
 
-
     def load_split_datasets(self, split='train'):
         '''tf dataset with AUTOTUNE to load from gcloud'''
         fullpath = f'{self.gcs_path}/{split}-*.tfrecord'
@@ -174,9 +172,11 @@ class Dataset:
         dataset = dataset.map(self.deserialise_example,
                               num_parallel_calls=tf.data.AUTOTUNE)
 
-        dataset = dataset.batch(config.DATASET_CONFIG['batch_size'])
+        dataset = dataset.batch(config.TRAINING_CONFIG['batch_size'])
 
         dataset = dataset.prefetch(tf.data.AUTOTUNE) #prefetch next batch during training
+
+        return dataset
 
 
     #need to fix:
