@@ -52,22 +52,52 @@ def create_callbacks():
 
     return [early_stopping, csv_logger]
 
-def train_model(model, initial_lr=0.1):
+def train_model(model, train_dataset, val_dataset, initial_lr=0.1):
+    """
+    Train the model using tf.data.Dataset objects loaded from GCS
 
-    model = compile_model(model)
+    Args:
+        model: Keras model to train
+        train_dataset: tf.data.Dataset for training (already batched and preprocessed)
+        val_dataset: tf.data.Dataset for validation (already batched and preprocessed)
+        initial_lr: Initial learning rate
+        steps_per_epoch: Number of batches per epoch (optional)
+        validation_steps: Number of validation batches (optional)
+    """
+    #calc steps for terminal progress bar display
+    steps_per_epoch = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['train_split']) // \
+                      config.TRAINING_CONFIG['batch_size']
+    validation_steps = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['val_split']) // \
+                       config.TRAINING_CONFIG['batch_size']
+
+    #compile, create callbacks
+    model = compile_model(model, initial_lr)
     print("Model compiled")
-    callbacks = create_callbacks()
+    callback_list = create_callbacks()
     print("Callbacks created")
 
-    model.fit(
-        X_train, y_train,
-        batch_size=config.TRAINING_CONFIG['batch_size'],
+    #train :)
+    history = model.fit(
+        train_dataset,
         epochs=config.TRAINING_CONFIG['epochs'],
-        val = [X_val, y_val],
-        callbacks=callbacks
+        validation_data=val_dataset,
+        steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps,
+        callbacks=callback_list
     )
     print("Model trained")
 
+    # Save trained model
+    model_path = f'{config.MODEL_DIR}/trained_model.keras'
+    model.save(model_path)
+    print(f"Model saved to {model_path}")
+
+    #save history
+    history_path = f'{config.LOG_DIR}/training_history.npz'
+    np.savez(history_path, **history.history)
+    print(f"Training history saved to {history_path}")
+
+    return history
 
 if __name__ == '__main__':
     create_model()

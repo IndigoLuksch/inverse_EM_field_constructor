@@ -1,6 +1,5 @@
 numpy
 tqdm
-tensorflow
 magpylib
 scipy
 google-cloud-storage

@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../fish-game/.idea/fish-game.iml" filepath="$PROJECT_DIR$/../fish-game/.idea/fish-game.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/inverse_EM_field_designer.iml" filepath="$PROJECT_DIR$/.idea/inverse_EM_field_designer.iml" />
     </modules>
   </component>

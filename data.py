@@ -29,7 +29,8 @@ class Dataset:
         self.points = None
         self.num_points = None
         self.local_path = 'tfrecords'
-        self.gcs_path = 'gs://inverse-em-bucket/tfrecords'
+        self.gcs_blob_path = 'tfrecords'
+        self.gcs_bucket_name = 'inverse-em-2'
         self.bucket = None
 
     def setup_gcloud(self):
@@ -55,8 +56,8 @@ class Dataset:
         example = tf.train.Example(features=tf.train.Features(feature=feature))
         return example.SerializeToString()
 
-    def deserialise_example(self, serialised_example):
-        '''parse single tfrecord to tensor'''
+    def deserialise_normalise_example(self, serialised_example):
+        '''parse single tfrecord to tensor and reshape to model input size'''
 
         feature = {
             'H': tf.io.FixedLenFeature([self.num_points * 2], tf.float32),
@@ -65,9 +66,27 @@ class Dataset:
 
         parsed = tf.io.parse_single_example(serialised_example , feature)
 
-        # Reshape H from flat array back to original shape
-        H = tf.reshape(parsed['H'], [self.num_points, 2])  # [n_points, 2] for (Hx, Hy)
+        #reshape H to input shape of ResNet50
+        H = tf.reshape(parsed['H'], [int(config.AOI_CONFIG['x_dim'] / config.AOI_CONFIG['resolution']) + 1,
+                                      int(config.AOI_CONFIG['y_dim'] / config.AOI_CONFIG['resolution']) + 1,
+                                      2])
+        H = tf.image.resize(H, [224, 224], method='bilinear')
+
+        #normalise H
+        H_MEAN = 0.0
+        H_STD = 1000.0  #estimated typical max H (across all data)
+        H = (H - H_MEAN) / H_STD
+
+        #normalise params to [0, 1] using ranges from config.py
         params = parsed['params']
+        params = tf.stack([
+            (params[0] + config.AOI_CONFIG['x_dim']) / (2 * config.AOI_CONFIG['x_dim']),  # x: -30 to 30 -> 0 to 1
+            (params[1] + config.AOI_CONFIG['y_dim']) / (2 * config.AOI_CONFIG['y_dim']),  # y: -30 to 30 -> 0 to 1
+            (params[2] - config.MAGNET_CONFIG['dim_min']) / (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']),  # a
+            (params[3] - config.MAGNET_CONFIG['dim_min']) / (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']),  # b
+            (params[4] - config.MAGNET_CONFIG['M_min']) / (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']),  # Mx
+            (params[5] - config.MAGNET_CONFIG['M_min']) / (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']),  # My
+        ])
 
         return H, params
 
@@ -131,7 +150,7 @@ class Dataset:
                 filename = f'{name}-{batch_idx:04d}.tfrecord'
                 local_fullpath = f'{self.local_path}/{filename}'
                 os.makedirs(os.path.dirname(local_fullpath), exist_ok=True)
-                gcs_fullpath = f'{self.gcs_path}/{filename}'
+                gcs_blob_fullpath = f'{self.gcs_blob_path}/{filename}'  # Blob path only
 
                 #indices
                 batch_start = batch_idx * samples_per_batch
@@ -150,16 +169,17 @@ class Dataset:
 
                             writer.write(self.serialise_example(H_single, params))
 
-                #upload to gcs®
-                self.upload_to_gcloud(local_fullpath, gcs_fullpath)
+                #upload to gcs
+                self.upload_to_gcloud(local_fullpath, gcs_blob_fullpath)
                 os.remove(local_fullpath)
 
     def load_split_datasets(self, split='train'):
         '''tf dataset with AUTOTUNE to load from gcloud'''
-        fullpath = f'{self.gcs_path}/{split}-*.tfrecord'
+        # Construct full GCS URI for glob pattern
+        fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
         files = tf.io.gfile.glob(fullpath)
 
-        dataset = tf.data.Dataset.from_tensor_slices(files) #dataset of filenames
+        dataset = tf.data.Dataset.from_tensor_slices(tf.constant(files, dtype=tf.string))
 
         #load data (not immediately)
         dataset = dataset.interleave( #interleave --> simultaneous
@@ -169,7 +189,7 @@ class Dataset:
         )
 
         #parse tfrecord to tensors
-        dataset = dataset.map(self.deserialise_example,
+        dataset = dataset.map(self.deserialise_normalise_example,
                               num_parallel_calls=tf.data.AUTOTUNE)
 
         dataset = dataset.batch(config.TRAINING_CONFIG['batch_size'])
@@ -268,6 +288,8 @@ class Dataset:
         self.points = data['points']
         print("Data loaded")
 
+'''
 generator = Dataset()
 generator.setup_gcloud()
 generator.generate_cubiod_data()  # num_batches should <= dataset_size
+'''

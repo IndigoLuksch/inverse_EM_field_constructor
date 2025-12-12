@@ -17,7 +17,7 @@ NOTES
 '''
 
 DATASET_CONFIG = {
-    'bucket_name': 'inverse-em-bucket', #gcloud
+    'bucket_name': 'inverse-em-2', #gcloud - new account
     'dataset_size': 60000, #change to 60 000
     'train_split': 0.6,
     'val_split': 0.3,
@@ -47,7 +47,7 @@ VIBE
 MODEL_CONFIG = {
     'name': 'ResNeXt-50',
     'input_shape': (224, 224, 2),  #H_x and H_y
-    'output_dim': 5,  #x, y, a, Mx, My
+    'output_dim': 6,  #x, y, a, b, Mx, My
     'cardinality': 32,  #number of groups
     'base_width': 4,  #channels per group
 }
@@ -56,7 +56,7 @@ MODEL_CONFIG = {
 TRAINING_CONFIG = {
     'batch_size': 60,
     'epochs': 100,
-    'initial_lr': 0.1,
+    'initial_lr': 0.002,
     #'lr_decay_factor': 0.1,
     #'lr_decay_epochs': [30, 60],  #decay lr at these epochs
     'momentum': 0.9,
