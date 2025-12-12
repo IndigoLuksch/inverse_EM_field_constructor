@@ -194,6 +194,8 @@ class Dataset:
 
         dataset = dataset.batch(config.TRAINING_CONFIG['batch_size'])
 
+        dataset = dataset.repeat() #repeat dataset for multiple epochs
+
         dataset = dataset.prefetch(tf.data.AUTOTUNE) #prefetch next batch during training
 
         return dataset

@@ -7,6 +7,28 @@ import data
 import config
 import model as Model
 
+#---configure GPU for Apple Silicon---
+print('---Configuring GPU---')
+# List available devices
+print("Available devices:")
+for device in tf.config.list_physical_devices():
+    print(f"  {device}")
+
+# Get GPU devices
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Enable memory growth to avoid taking all GPU memory at once
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"✓ GPU acceleration enabled: {len(gpus)} GPU(s) found")
+        print(f"  Device: {gpus[0]}")
+    except RuntimeError as e:
+        print(f"GPU configuration error: {e}")
+else:
+    print("⚠ No GPU found - running on CPU")
+print('Complete\n')
+
 #---generate data and save to gcloud---
 '''
 print('Generating data')

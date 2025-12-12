@@ -1,4 +1,3 @@
-from keras.src.callbacks import early_stopping
 from tensorflow.keras import layers, models, optimizers, callbacks
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.applications import ResNet50
@@ -83,7 +82,8 @@ def train_model(model, train_dataset, val_dataset, initial_lr=0.1):
         validation_data=val_dataset,
         steps_per_epoch=steps_per_epoch,
         validation_steps=validation_steps,
-        callbacks=callback_list
+        callbacks=callback_list,
+        verbose=1  #show progress bar for both training and validation
     )
     print("Model trained")
 
