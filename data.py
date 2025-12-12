@@ -174,29 +174,38 @@ class Dataset:
                 os.remove(local_fullpath)
 
     def load_split_datasets(self, split='train'):
-        '''tf dataset with AUTOTUNE to load from gcloud'''
-        # Construct full GCS URI for glob pattern
+        '''tf dataset with AUTOTUNE to load from gcloud - optimized for GPU'''
         fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
         files = tf.io.gfile.glob(fullpath)
 
         dataset = tf.data.Dataset.from_tensor_slices(tf.constant(files, dtype=tf.string))
+        dataset = dataset.shuffle(buffer_size=len(files))  #shuffle for better parallelisation
 
-        #load data (not immediately)
-        dataset = dataset.interleave( #interleave --> simultaneous
-            lambda x : tf.data.TFRecordDataset(x), #filename --> TFRec reads file
-            cycle_length=tf.data.AUTOTUNE,
-            num_parallel_calls=tf.data.AUTOTUNE #AUTOTUNE for optimised parallel loading
+        #better fcs performance
+        options = tf.data.Options()
+        options.experimental_deterministic = False
+
+        #load data with optimized settings
+        dataset = dataset.interleave(
+            lambda x: tf.data.TFRecordDataset(x, num_parallel_reads=1),
+            cycle_length=16,  #read 16 files simult.
+            block_length=8,  #read 8 records per file
+            num_parallel_calls=tf.data.AUTOTUNE,
+            deterministic=False
         )
 
-        #parse tfrecord to tensors
+        dataset = dataset.with_options(options)
+
+        #parse and batch - do together for efficiency
         dataset = dataset.map(self.deserialise_normalise_example,
                               num_parallel_calls=tf.data.AUTOTUNE)
 
-        dataset = dataset.batch(config.TRAINING_CONFIG['batch_size'])
+        dataset = dataset.batch(config.TRAINING_CONFIG['batch_size'],
+                                drop_remainder=True)  #drop incomplete batches
 
-        dataset = dataset.repeat() #repeat dataset for multiple epochs
+        dataset = dataset.repeat()
 
-        dataset = dataset.prefetch(tf.data.AUTOTUNE) #prefetch next batch during training
+        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
         return dataset
 
