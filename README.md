@@ -30,6 +30,6 @@ A ResNet50 model was trained on 60000 data points (cuboidal magnets in a 2D plan
 
 [run.py](run.py), [data.py](data.py), [model.py](model.py), [config.py](config.py) are the core files required to generate data, use Google Cloud, and train the model. 
 
-[Dockerfile](Dockerfile), [docker-compose.yaml](docker-compose.yaml) are needed to containerise this process. (I made some notes [here](scratch/How to use Docker, gcloud.txt).
+[Dockerfile](Dockerfile), [docker-compose.yaml](docker-compose.yaml) are needed to containerise this process. (I made some notes [here](scratch/docker-gcloud-notes.txt).
 
 [E_field_notebook](1_initial_attempt/E_field_notebook.ipynb) notebook contains initial attempts create a convolutional NN for an electric field
