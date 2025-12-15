@@ -27,7 +27,10 @@ class Dataset:
         self.magnets = None
         self.H = None
         self.points = None
-        self.num_points = None
+        # Calculate num_points from config (for deserializing TFRecords)
+        grid_x = int(config.AOI_CONFIG['x_dim'] / config.AOI_CONFIG['resolution']) + 1
+        grid_y = int(config.AOI_CONFIG['y_dim'] / config.AOI_CONFIG['resolution']) + 1
+        self.num_points = grid_x * grid_y
         self.local_path = 'tfrecords'
         self.gcs_blob_path = 'tfrecords'
         self.gcs_bucket_name = 'inverse-em-2'
