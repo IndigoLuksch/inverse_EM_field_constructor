@@ -1,0 +1,27 @@
+GENERAL
+
+--rm --> removes container after running 
+
+docker build -t inverse-em-app (name) . (current directory)
+docker-compose (yaml filename) run --rm em-script (service in yaml)
+
+gcloud storage buckets create gs://inverse-em-bucket --location=us-central1
+
+
+HOW TO USE VERTEX AI
+
+Tag image (tell docker where to push it to, later)
+docker tag inverse-em-app gcr.io/YOUR-PROJECT-ID/inverse-em-app:latest
+
+
+
+  # Push to GCR
+  docker push gcr.io/YOUR-PROJECT-ID/inverse-em-app:latest
+
+
+# Submit training job: 
+gcloud ai custom-jobs create \--display-name="inverse-em-training" \--region="us-central1" \--worker-pool-spec="machine-type=n1-standard-8,replica-count=1,accelerator-type=NVIDIA_TESLA_P100,accelerator-count=1,container-image-uri=gcr.io/citric-optics-481013-q6/inverse-em-trainer:latest"
+
+
+gcloud ai custom-jobs create \--display-name="inverse-em-training-V100-preemptible" \--region="asia-east1" \--worker-pool-spec="machine-type=n1-standard-8,replica-count=1,accelerator-type=NVIDIA_TESLA_V100,accelerator-count=1,container-image-uri=gcr.io/citric-optics-481013-q6/inverse-em-trainer:latest"
+

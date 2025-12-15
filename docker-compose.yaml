@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  em-script:
+    image: inverse-em-app
+    # This ensures the container is removed after the script finishes
+    profiles: ["run"]
+    # Overrides the default entrypoint to ensure the script runs
+    entrypoint: python
+    # Arguments passed to the entrypoint (i.e., 'python data.py')
+    command: data.py
+    # Mounts your credentials file as a volume
+    volumes:
+      - ~/.config/gcloud/application_default_credentials.json:/app/gcloud-key.json:ro
+    # Sets the environment variable
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcloud-key.json
+      - GOOGLE_CLOUD_PROJECT=inverse-em-constructor
