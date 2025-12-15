@@ -13,6 +13,8 @@ Approach:
 
 A ResNet50 model was trained on 60000 data points (cuboidal magnets in a 2D plane). 
 
+![val loss](scratch/val_loss.png "Training: validation loss")
+
 *Results from first attempt:*
 
 - x position - MAE: 0.056974% 
