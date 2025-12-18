@@ -29,7 +29,7 @@ class Dataset:
         self.points = None
 
         #---file paths---
-        self.local_path = 'tfrecords'
+        self.local_path = 'data/tfrecords'
         self.gcs_blob_path = 'tfrecords'
         self.gcs_bucket_name = 'inverse-em-2'
         self.bucket = None
@@ -109,7 +109,7 @@ class Dataset:
 
         return H, params
 
-    def generate_cubiod_data(self, num_batches=1000): #cuboid-shaped magnets
+    def generate_cuboid_data(self, use_gcs=False, num_batches=1000):
         #---generate magpy magnet collection---
         sampler = qmc.LatinHypercube(d=6)
         samples = sampler.random(n=config.DATASET_CONFIG['dataset_size'])
@@ -125,7 +125,7 @@ class Dataset:
         for i in tqdm(range(config.DATASET_CONFIG['dataset_size'])):
             magnet = magpy.magnet.Cuboid(polarization=(Mx_samples[i], My_samples[i], 0),
                                          dimension=(a_samples[i], b_samples[i], 1),
-                                         position=(x_samples[i], y_samples[i], 0))
+                                         position=(x_samples[i], y_samples[i], 2.5))
             magnets.append(magnet)
 
         #---save metadata---
@@ -146,14 +146,19 @@ class Dataset:
 
         samples_per_batch = -(config.DATASET_CONFIG['dataset_size'] // -num_batches)  # ceiling division
 
-        #---calculate magnetic field at each AOI point; save as tfrecord; save in batches (e.g. to reduce gcs API calls)
+        #---calculate magnetic field at each AOI point; save as tfrecord; save in batches (e.g. to reduce gcs API calls)---
+        #if use_gcs=True: save locally, upload to gcs, delete local copy
+        #if use_gcs=False: save locally
+
+        #generate, upload data
         for i, split in enumerate([train_split_idx, val_split_idx, test_split_idx]):
             for batch_idx in tqdm(split, desc=f"Generating {'train' if i==0 else 'val' if i==1 else 'test'} data"):
                 name = ['train', 'val', 'test'][i]
                 filename = f'{name}-{batch_idx:04d}.tfrecord'
                 local_fullpath = f'{self.local_path}/{filename}'
                 os.makedirs(os.path.dirname(local_fullpath), exist_ok=True)
-                gcs_blob_fullpath = f'{self.gcs_blob_path}/{filename}'  # Blob path only
+                if use_gcs:
+                    gcs_blob_fullpath = f'{self.gcs_blob_path}/{filename}'
 
                 #indices
                 batch_start = batch_idx * samples_per_batch
@@ -173,8 +178,9 @@ class Dataset:
                             writer.write(self.serialise_example(H_single, params))
 
                 #upload to gcs
-                self.upload_to_gcloud(local_fullpath, gcs_blob_fullpath)
-                os.remove(local_fullpath)
+                if use_gcs:
+                    self.upload_to_gcloud(local_fullpath, gcs_blob_fullpath)
+                    os.remove(local_fullpath)
 
     def load_split_datasets(self, split='train'):
         '''tf dataset with AUTOTUNE to load from gcloud - optimized for GPU'''
@@ -212,88 +218,116 @@ class Dataset:
 
         return dataset
 
-
-    #need to fix:
-    def visualize_random_sample(self):
+    def visualise_random_sample(self, use_gcloud=False, split='train', num_samples=1):
         '''
         VIBE CODED
-        • note that field is only calculated in AOI
-        Visualizes a random sample from the generated dataset showing:
+
+        Visualizes random samples from the tfrecord dataset showing:
         • Magnetic field magnitude as heatmap
         • Field direction as vector arrows
         • Magnet position and dimensions as a rectangle
         • Magnetization vector as an arrow
+
+        Args:
+            use_gcloud: If True, load from GCS bucket. If False, load from local tfrecords
+            split: Which split to load from ('train', 'val', or 'test')
+            num_samples: Number of random samples to visualize
         '''
-        if self.magnets is None:
-            metadata = np.load(f'{self.local_path}/metadata.npz', allow_pickle=True)
-            self.magnets = metadata['magnets']
-            self.points = metadata['points']
+        # Get list of tfrecord files
+        if use_gcloud:
+            fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
+            files = tf.io.gfile.glob(fullpath)
+            if not files:
+                print(f"No files found at {fullpath}")
+                return
+        else:
+            import glob
+            fullpath = f'{self.local_path}/{split}-*.tfrecord'
+            files = glob.glob(fullpath)
+            if not files:
+                print(f"No files found at {fullpath}. Make sure tfrecords exist locally.")
+                return
 
-            # Select random sample
-        idx = random.randint(0, len(self.magnets) - 1)
-        magnet = self.magnets[idx]
+        print(f"Found {len(files)} tfrecord files")
 
-        # Load the corresponding H field
-        H_sample = np.load(f'data/H_{idx:06d}.npy')
+        # Load dataset
+        dataset = tf.data.TFRecordDataset(files)
+        dataset = dataset.map(lambda x: tf.io.parse_single_example(x, {
+            'H': tf.io.FixedLenFeature([self.num_points * 2], tf.float32),
+            'params': tf.io.FixedLenFeature([6], tf.float32),
+        }))
 
-        #get magnet properties
-        pos = magnet.position
-        dim = magnet.dimension
-        pol = magnet.polarization
+        # Randomly sample
+        dataset = dataset.shuffle(buffer_size=1000)
+        dataset = dataset.take(num_samples)
 
-        #reshape H field for visualization
-        grid_size = int(np.sqrt(self.points.shape[0]))
-        Hx = H_sample[:, 0].reshape(grid_size, grid_size)
-        Hy = H_sample[:, 1].reshape(grid_size, grid_size)
-        H_magnitude = np.sqrt(Hx**2 + Hy**2)
+        # Visualize each sample
+        for idx, sample in enumerate(dataset):
+            # Extract H field and params
+            H_flat = sample['H'].numpy()
+            params = sample['params'].numpy()
 
-        #create meshgrid for quiver plot
-        x = np.linspace(-config.AOI_CONFIG['x_dim']/2, config.AOI_CONFIG['x_dim']/2, grid_size)
-        y = np.linspace(-config.AOI_CONFIG['y_dim']/2, config.AOI_CONFIG['y_dim']/2, grid_size)
-        X, Y = np.meshgrid(x, y)
+            # Reshape H field: flat -> (301, 301, 2)
+            grid_size = int(config.AOI_CONFIG['x_dim'] / config.AOI_CONFIG['resolution']) + 1
+            H_field = H_flat.reshape(grid_size, grid_size, 2)
+            Hx = H_field[:, :, 0]
+            Hy = H_field[:, :, 1]
+            H_magnitude = np.sqrt(Hx**2 + Hy**2)
 
-        #downsample for quiver plot (every nth point)
-        skip = max(1, grid_size // 20)
+            # Extract magnet parameters (unnormalized)
+            pos_x, pos_y = params[0], params[1]
+            dim_a, dim_b = params[2], params[3]
+            pol_Mx, pol_My = params[4], params[5]
 
-        #create single figure
-        fig, ax = plt.subplots(figsize=(10, 9))
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 9))
 
-        #plot magnitude as heatmap
-        im = ax.imshow(H_magnitude, extent=[-config.AOI_CONFIG['x_dim']/2, config.AOI_CONFIG['x_dim']/2,
-                                            -config.AOI_CONFIG['y_dim']/2, config.AOI_CONFIG['y_dim']/2],
-                       origin='lower', cmap='viridis', alpha=0.8)
+            # Plot magnitude as heatmap
+            extent = [-config.AOI_CONFIG['x_dim']/2, config.AOI_CONFIG['x_dim']/2,
+                      -config.AOI_CONFIG['y_dim']/2, config.AOI_CONFIG['y_dim']/2]
+            im = ax.imshow(H_magnitude, extent=extent, origin='lower', cmap='viridis', alpha=0.8)
 
-        #plot vector field (downsampled)
-        ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
-                  Hx[::skip, ::skip], Hy[::skip, ::skip],
-                  color='white', alpha=0.6, scale=np.max(H_magnitude)*20)
+            # Plot vector field (downsampled)
+            skip = max(1, grid_size // 20)
+            x = np.linspace(-config.AOI_CONFIG['x_dim']/2, config.AOI_CONFIG['x_dim']/2, grid_size)
+            y = np.linspace(-config.AOI_CONFIG['y_dim']/2, config.AOI_CONFIG['y_dim']/2, grid_size)
+            X, Y = np.meshgrid(x, y)
 
-        #plot magnet as rectangle
-        ax.add_patch(Rectangle((pos[0] - dim[0]/2, pos[1] - dim[1]/2),
-                                dim[0], dim[1],
-                                fill=False, edgecolor='red', linewidth=3))
+            ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
+                     Hx[::skip, ::skip], Hy[::skip, ::skip],
+                     color='white', alpha=0.6, scale=np.max(H_magnitude)*20 if np.max(H_magnitude) > 0 else 1)
 
-        #plot magnetization vector
-        ax.arrow(pos[0], pos[1], pol[0]*3, pol[1]*3,
-                 head_width=1, head_length=1, fc='red', ec='red', linewidth=3)
+            # Plot magnet as rectangle
+            ax.add_patch(Rectangle((pos_x - dim_a/2, pos_y - dim_b/2),
+                                   dim_a, dim_b,
+                                   fill=False, edgecolor='red', linewidth=3))
 
-        ax.set_title(f'Magnetic Field Distribution (Sample {idx})', fontsize=14, fontweight='bold')
-        ax.set_xlabel('x (m)', fontsize=12)
-        ax.set_ylabel('y (m)', fontsize=12)
+            # Plot magnetization vector (scaled for visibility)
+            arrow_scale = min(dim_a, dim_b) * 0.5
+            ax.arrow(pos_x, pos_y, pol_Mx*arrow_scale, pol_My*arrow_scale,
+                    head_width=1, head_length=1, fc='red', ec='red', linewidth=3)
 
-        cbar = plt.colorbar(im, ax=ax, label='|H| (A/m)')
-        cbar.ax.tick_params(labelsize=10)
+            ax.set_title(f'Magnetic Field Distribution (Sample {idx+1})', fontsize=14, fontweight='bold')
+            ax.set_xlabel('x (m)', fontsize=12)
+            ax.set_ylabel('y (m)', fontsize=12)
 
-        #add info text
-        info_text = (f'Magnet Position: ({pos[0]:.2f}, {pos[1]:.2f}) m\n'
-                     f'Dimensions: ({dim[0]:.2f}, {dim[1]:.2f}) m\n'
-                     f'Polarization: ({pol[0]:.3f}, {pol[1]:.3f}) T')
-        ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
-                fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            cbar = plt.colorbar(im, ax=ax, label='|H| (A/m)')
+            cbar.ax.tick_params(labelsize=10)
 
-        plt.tight_layout()
-        plt.show()
+            # Add info text
+            info_text = (f'Magnet Position: ({pos_x:.2f}, {pos_y:.2f}) m\n'
+                        f'Dimensions: ({dim_a:.2f}, {dim_b:.2f}) m\n'
+                        f'Polarization: ({pol_Mx:.3f}, {pol_My:.3f}) T\n'
+                        f'Max |H|: {np.max(H_magnitude):.2f} A/m\n'
+                        f'Mean |H|: {np.mean(H_magnitude):.2f} A/m')
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
+                   fontsize=10, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+            plt.tight_layout()
+            plt.show()
+
+        print(f"Visualized {num_samples} sample(s) from {split} split")
 
     def load_training_data(self, filename='generated_data.npz'):
         data = np.load(filename)
@@ -302,8 +336,5 @@ class Dataset:
         self.points = data['points']
         print("Data loaded")
 
-'''
 generator = Dataset()
-generator.setup_gcloud()
-generator.generate_cubiod_data()  # num_batches should <= dataset_size
-'''
+generator.generate_cuboid_data()  #num_batches should <= dataset_size
