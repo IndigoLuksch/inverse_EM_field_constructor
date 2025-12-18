@@ -14,6 +14,9 @@ print("Available devices:")
 for device in tf.config.list_physical_devices():
     print(f"  {device}")
 
+'''
+VIBE 
+'''
 # Get GPU devices
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
@@ -28,6 +31,9 @@ if gpus:
 else:
     print("⚠ No GPU found - running on CPU")
 print('Complete\n')
+'''
+END VIBE 
+'''
 
 #---generate data and save to gcloud---
 '''

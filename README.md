@@ -28,7 +28,7 @@ A ResNet50 model was trained on 60000 data points (cuboidal magnets in a 2D plan
 
 ## Files 
 
-[run.py](run.py), [data.py](data.py), [model.py](model.py), [config.py](config.py) are the core files required to generate data, use Google Cloud, and train the model. 
+[run.py](run_train.py), [data.py](data.py), [model.py](model.py), [config.py](config.py) are the core files required to generate data, use Google Cloud, and train the model. 
 
 [Dockerfile](Dockerfile), [docker-compose.yaml](docker-compose.yaml) are needed to containerise this process. (I made some notes [here](scratch/docker-gcloud-notes).)
 

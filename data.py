@@ -27,14 +27,30 @@ class Dataset:
         self.magnets = None
         self.H = None
         self.points = None
-        # Calculate num_points from config (for deserializing TFRecords)
-        grid_x = int(config.AOI_CONFIG['x_dim'] / config.AOI_CONFIG['resolution']) + 1
-        grid_y = int(config.AOI_CONFIG['y_dim'] / config.AOI_CONFIG['resolution']) + 1
-        self.num_points = grid_x * grid_y
+
+        #---file paths---
         self.local_path = 'tfrecords'
         self.gcs_blob_path = 'tfrecords'
         self.gcs_bucket_name = 'inverse-em-2'
         self.bucket = None
+
+        #---AOI points---
+        x = np.arange(-config.AOI_CONFIG['x_dim'] / 2,
+                      config.AOI_CONFIG['x_dim'] / 2 + config.AOI_CONFIG['resolution'],
+                      config.AOI_CONFIG['resolution'])
+
+        y = np.arange(-config.AOI_CONFIG['y_dim'] / 2,
+                      config.AOI_CONFIG['y_dim'] / 2 + config.AOI_CONFIG['resolution'],
+                      config.AOI_CONFIG['resolution'])
+
+        X, Y = np.meshgrid(x, y)
+        Z = np.zeros_like(X)
+
+        self.points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+        self.num_points = len(self.points)
+
+        #---data normalisation---
+        self.H_STD = 1000
 
     def setup_gcloud(self):
         '''Initialise Google Cloud Storage and bucket'''
@@ -77,7 +93,7 @@ class Dataset:
 
         #normalise H
         H_MEAN = 0.0
-        H_STD = 1000.0  #estimated typical max H (across all data)
+        H_STD = self.H_STD  #estimated typical max H (across all data)
         H = (H - H_MEAN) / H_STD
 
         #normalise params to [0, 1] using ranges from config.py
@@ -112,21 +128,6 @@ class Dataset:
                                          position=(x_samples[i], y_samples[i], 0))
             magnets.append(magnet)
 
-        #---generate AOI points---
-        x = np.arange(-config.AOI_CONFIG['x_dim'] / 2,
-                    config.AOI_CONFIG['x_dim'] / 2 + config.AOI_CONFIG['resolution'],
-                    config.AOI_CONFIG['resolution'])
-
-        y = np.arange(-config.AOI_CONFIG['y_dim'] / 2,
-                      config.AOI_CONFIG['y_dim'] / 2 + config.AOI_CONFIG['resolution'],
-                      config.AOI_CONFIG['resolution'])
-
-        X, Y = np.meshgrid(x, y)
-        Z = np.zeros_like(X)
-
-        points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
-        self.num_points = len(points)
-
         #---save metadata---
         #np.savez(f'{self.local_path}/metadata.npz', magnets=magnets, points=points)
         #self.upload_to_gcloud(local_path=f'{self.local_path}/metadata.npz', gcs_path=f'{self.gcs_path}/metadata.npz')
@@ -146,7 +147,6 @@ class Dataset:
         samples_per_batch = -(config.DATASET_CONFIG['dataset_size'] // -num_batches)  # ceiling division
 
         #---calculate magnetic field at each AOI point; save as tfrecord; save in batches (e.g. to reduce gcs API calls)
-
         for i, split in enumerate([train_split_idx, val_split_idx, test_split_idx]):
             for batch_idx in tqdm(split, desc=f"Generating {'train' if i==0 else 'val' if i==1 else 'test'} data"):
                 name = ['train', 'val', 'test'][i]
@@ -163,7 +163,7 @@ class Dataset:
                 with tf.io.TFRecordWriter(local_fullpath) as writer:
                     for j in range(batch_start, batch_end):
                         if magnets[j] is not None: #last batch may not contain samples_per_batch samples
-                            H_single = magpy.getH(magnets[j], points)[:, :2].astype(np.float32)
+                            H_single = magpy.getH(magnets[j], self.points)[:, :2].astype(np.float32)
                             params = np.array([
                                 magnets[j].position[0], magnets[j].position[1],
                                 magnets[j].dimension[0], magnets[j].dimension[1],
