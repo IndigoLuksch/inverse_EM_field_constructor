@@ -43,10 +43,9 @@ generator.setup_gcloud()
 generator.generate_cubiod_data()
 '''
 
-#---load datasets from gcloud---
-print('---Loading datasets from GCS---')
+#---load datasets---
+print('---Loading datasets---')
 dataset_loader = data.Dataset()
-dataset_loader.num_points = int((config.AOI_CONFIG['x_dim'] / config.AOI_CONFIG['resolution']) + 1) ** 2
 
 train_dataset = dataset_loader.load_split_datasets(split='train')
 val_dataset = dataset_loader.load_split_datasets(split='val')

@@ -121,13 +121,6 @@ class Dataset:
         Mx_samples = qmc.scale(samples[:,4:5], config.MAGNET_CONFIG['M_min'], config.MAGNET_CONFIG['M_max']).flatten()
         My_samples = qmc.scale(samples[:, 5:6], config.MAGNET_CONFIG['M_min'], config.MAGNET_CONFIG['M_max']).flatten()
 
-        magnets = []
-        for i in tqdm(range(config.DATASET_CONFIG['dataset_size'])):
-            magnet = magpy.magnet.Cuboid(polarization=(Mx_samples[i], My_samples[i], 0),
-                                         dimension=(a_samples[i], b_samples[i], 1),
-                                         position=(x_samples[i], y_samples[i], 2.5))
-            magnets.append(magnet)
-
         #---save metadata---
         #np.savez(f'{self.local_path}/metadata.npz', magnets=magnets, points=points)
         #self.upload_to_gcloud(local_path=f'{self.local_path}/metadata.npz', gcs_path=f'{self.gcs_path}/metadata.npz')
@@ -167,25 +160,36 @@ class Dataset:
                 #generate H and save tfrecord
                 with tf.io.TFRecordWriter(local_fullpath) as writer:
                     for j in range(batch_start, batch_end):
-                        if magnets[j] is not None: #last batch may not contain samples_per_batch samples
-                            H_single = magpy.getH(magnets[j], self.points)[:, :2].astype(np.float32)
-                            params = np.array([
-                                magnets[j].position[0], magnets[j].position[1],
-                                magnets[j].dimension[0], magnets[j].dimension[1],
-                                magnets[j].polarization[0], magnets[j].polarization[1]
-                            ], dtype=np.float32)
+                        #if x_samples[j] is not None: #last batch may not contain samples_per_batch samples
+                        magnet = magpy.magnet.Cuboid(polarization=(Mx_samples[j], My_samples[j], 0),
+                                                     dimension=(a_samples[j], b_samples[j], 1),
+                                                     position=(x_samples[j], y_samples[j], 2.5))
+                        H_single = magpy.getH(magnet, self.points)[:, :2].astype(np.float32)
+                        params = np.array([x_samples[j], y_samples[j],
+                                           a_samples[j], b_samples[j],
+                                           Mx_samples[j], My_samples[j]
+                                           ], dtype=np.float32)
 
-                            writer.write(self.serialise_example(H_single, params))
+                        writer.write(self.serialise_example(H_single, params))
 
                 #upload to gcs
                 if use_gcs:
                     self.upload_to_gcloud(local_fullpath, gcs_blob_fullpath)
                     os.remove(local_fullpath)
 
-    def load_split_datasets(self, split='train'):
-        '''tf dataset with AUTOTUNE to load from gcloud - optimized for GPU'''
-        fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
-        files = tf.io.gfile.glob(fullpath)
+    def load_split_datasets(self, split='train', use_gcs=False):
+        '''tf dataset with AUTOTUNE to load from gcloud'''
+        if use_gcs:
+            fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
+            files = tf.io.gfile.glob(fullpath)
+            if not files:
+                print(f"No files found at {fullpath}")
+        else:
+            import glob
+            fullpath = f'{self.local_path}/{split}-*.tfrecord'
+            files = glob.glob(fullpath)
+            if not files:
+                print(f"No files found at {fullpath}. Make sure tfrecords exist locally.")
 
         dataset = tf.data.Dataset.from_tensor_slices(tf.constant(files, dtype=tf.string))
         dataset = dataset.shuffle(buffer_size=len(files))  #shuffle for better parallelisation
@@ -336,5 +340,8 @@ class Dataset:
         self.points = data['points']
         print("Data loaded")
 
-generator = Dataset()
-generator.generate_cuboid_data()  #num_batches should <= dataset_size
+if __name__ == '__main__':
+    print(f"running data.py ...")
+    time.sleep(10)
+    #generator = Dataset()
+    #generator.generate_cuboid_data()  #num_batches should <= dataset_size
