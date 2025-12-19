@@ -41,7 +41,6 @@ print('Generating data')
 generator = data.Dataset()
 generator.setup_gcloud()
 generator.generate_cubiod_data()
-'''
 
 #---load datasets---
 print('---Loading datasets---')
