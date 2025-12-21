@@ -51,3 +51,10 @@ A ResNet50 model was trained on 60000 data points (cuboidal magnets in a 2D plan
 [Dockerfile](Dockerfile), [docker-compose.yaml](docker-compose.yaml) are needed to containerise this process. (I made some notes [here](scratch/docker-gcloud-notes).)
 
 [E_field_notebook](1_initial_attempt/E_field_notebook.ipynb) notebook contains initial attempts create a convolutional NN for an electric field
+
+## List of models
+Model files are large so I have not uploaded them here. Contact me if you would like access :) 
+
+model1: params MSE loss, field calculated in plane of magnet 
+model2: params MSE loss, field calculated just above magnet --> less extreme values 
+model3: hybrid loss (field : params = 1 : 20) 
