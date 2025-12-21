@@ -177,8 +177,9 @@ class Dataset:
                     self.upload_to_gcloud(local_fullpath, gcs_blob_fullpath)
                     os.remove(local_fullpath)
 
-    def load_split_datasets(self, split='train', use_gcs=False):
-        '''tf dataset with AUTOTUNE to load from gcloud'''
+    def load_split_datasets(self, split='train', use_gcs=False, prop_to_load=1.0):
+        '''tf dataset with AUTOTUNE to load from gcloud
+        prop_to_load: proportion of dataset to load (float)'''
         if use_gcs:
             fullpath = f'gs://{self.gcs_bucket_name}/{self.gcs_blob_path}/{split}-*.tfrecord'
             files = tf.io.gfile.glob(fullpath)
@@ -188,6 +189,10 @@ class Dataset:
             import glob
             fullpath = f'{self.local_path}/{split}-*.tfrecord'
             files = glob.glob(fullpath)
+            if prop_to_load != 1.0:
+                random.shuffle(files)
+                files = files[0:(int(prop_to_load*len(files)))]
+
             if not files:
                 print(f"No files found at {fullpath}. Make sure tfrecords exist locally.")
 
@@ -198,10 +203,10 @@ class Dataset:
         options = tf.data.Options()
         options.experimental_deterministic = False
 
-        #load data with optimized settings
+        #load data with optimised settings
         dataset = dataset.interleave(
             lambda x: tf.data.TFRecordDataset(x, num_parallel_reads=1),
-            cycle_length=16,  #read 16 files simult.
+            cycle_length=16,  #read 16 files simultan
             block_length=8,  #read 8 records per file
             num_parallel_calls=tf.data.AUTOTUNE,
             deterministic=False
@@ -209,7 +214,7 @@ class Dataset:
 
         dataset = dataset.with_options(options)
 
-        #parse and batch - do together for efficiency
+        #parse and batch
         dataset = dataset.map(self.deserialise_normalise_example,
                               num_parallel_calls=tf.data.AUTOTUNE)
 

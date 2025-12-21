@@ -23,79 +23,138 @@ def create_model(input_shape=config.MODEL_CONFIG['input_shape'], output_dim=conf
         pooling='avg' #use global average pooling rather than flattening (flattening forces model to train on oddly shaped vectors that do not capture the shape of the data)
     )
 
-    output = layers.Dense(output_dim, activation=None)(base_model.output) #create output layer of right shape, linear activation
+    output = layers.Dense(output_dim, activation='sigmoid')(base_model.output) #sigmoid to constrain to [0, 1]
 
     model = models.Model(inputs=base_model.input, outputs=output)
 
     print("ResNet50 model created")
     return model
 
-def compute_loss_single(params_true, params_pred):
-    """
-    computes loss for pair of parameters values
-    """
-    #convert to np
-    params_true = np.array(params_true, dtype=np.float32)
-    params_pred = np.array(params_pred, dtype=np.float32)
-
-    #penalise negative dimensions (magpylib doesn't allow negative dimensions)
-    if np.min(params_pred[2:4]) < 0:
-        return 4.0 * (1.0 + np.sum(np.abs(params_pred[2:4][params_pred[2:4] < 0])))
-
-    #create magnets
-    magnet_true = magpy.magnet.Cuboid(
-        position=(float(params_true[0]), float(params_true[1]), 2.5),
-        dimension=(float(params_true[2]), float(params_true[3]), 1),
-        polarization=(float(params_true[4]), float(params_true[5]), 0)
-    )
-    magnet_pred = magpy.magnet.Cuboid(
-        position=(float(params_pred[0]), float(params_pred[1]), 2.5),
-        dimension=(float(params_pred[2]), float(params_pred[3]), 1),
-        polarization=(float(params_pred[4]), float(params_pred[5]), 0)
-    )
-
-    #compute H
-    H_true = magpy.getH(magnet_true, Dataset.points)
-    H_pred = magpy.getH(magnet_pred, Dataset.points)
-
-    return np.mean((H_true - H_pred)**2).astype(np.float32)
-
 def custom_loss(params_true, params_pred):
     """
-    Pure TensorFlow implementation of magnetic field loss.
+    MOSTLY VIBE CODED
 
-    MUCH faster than the magpylib wrapper because:
-    - No Python/NumPy function calls
-    - Automatic differentiation (analytical gradients)
-    - GPU acceleration
-    - No sequential processing
+    hybrid loss: linear combination of H field MSE and parameter MSE
+    (sigmoid activation --> dimensions always +ve --> no need for negative dimension penalty)
     """
 
-    # Convert observation points to TensorFlow tensor
+    #---data prep---
     observation_points = tf.constant(Dataset.points, dtype=tf.float32)
+    batch_size = tf.shape(params_pred)[0]
+    n_points = tf.shape(observation_points)[0]
 
-    # Add penalty for negative dimensions
-    # Use soft constraint for smooth gradients
-    negative_penalty = tf.reduce_sum(tf.maximum(0.0, -params_pred[:, 2:4])**2)
+    #denormalise
+    params_true_denorm = tf.stack([
+        params_true[:, 0] * (2 * config.AOI_CONFIG['x_dim']) - config.AOI_CONFIG['x_dim'],  # x: 0-1 -> -30 to 30
+        params_true[:, 1] * (2 * config.AOI_CONFIG['y_dim']) - config.AOI_CONFIG['y_dim'],  # y: 0-1 -> -30 to 30
+        params_true[:, 2] * (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']) + config.MAGNET_CONFIG['dim_min'],  # a
+        params_true[:, 3] * (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']) + config.MAGNET_CONFIG['dim_min'],  # b
+        params_true[:, 4] * (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']) + config.MAGNET_CONFIG['M_min'],  # Mx
+        params_true[:, 5] * (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']) + config.MAGNET_CONFIG['M_min'],  # My
+    ], axis=1)
 
-    # Compute physics loss using TensorFlow implementation
-    physics_loss = magnet_field_tf.compute_field_mse_loss(
-        params_true,
-        params_pred,
-        observation_points
-    )
+    params_pred_denorm = tf.stack([
+        params_pred[:, 0] * (2 * config.AOI_CONFIG['x_dim']) - config.AOI_CONFIG['x_dim'],
+        params_pred[:, 1] * (2 * config.AOI_CONFIG['y_dim']) - config.AOI_CONFIG['y_dim'],
+        params_pred[:, 2] * (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']) + config.MAGNET_CONFIG['dim_min'],
+        params_pred[:, 3] * (config.MAGNET_CONFIG['dim_max'] - config.MAGNET_CONFIG['dim_min']) + config.MAGNET_CONFIG['dim_min'],
+        params_pred[:, 4] * (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']) + config.MAGNET_CONFIG['M_min'],
+        params_pred[:, 5] * (config.MAGNET_CONFIG['M_max'] - config.MAGNET_CONFIG['M_min']) + config.MAGNET_CONFIG['M_min'],
+    ], axis=1)
 
-    # Total loss = physics + constraint penalty
-    total_loss = physics_loss + 10.0 * negative_penalty
+    #---calculate true H field---
+    positions_true = tf.stack([
+        params_true_denorm[:, 0],
+        params_true_denorm[:, 1],
+        tf.fill([batch_size], 2.5)
+    ], axis=1)
+
+    dimensions_true = tf.stack([
+        params_true_denorm[:, 2],
+        params_true_denorm[:, 3],
+        tf.ones([batch_size])
+    ], axis=1)
+
+    polarizations_true = tf.stack([
+        params_true_denorm[:, 4],
+        params_true_denorm[:, 5],
+        tf.zeros([batch_size])
+    ], axis=1)
+
+    #all obseration points
+    obs_expanded = tf.tile(tf.expand_dims(observation_points, 0), [batch_size, 1, 1])
+    positions_true_rep = tf.repeat(positions_true, n_points, axis=0)
+    dimensions_true_rep = tf.repeat(dimensions_true, n_points, axis=0)
+    polarizations_true_rep = tf.repeat(polarizations_true, n_points, axis=0)
+    obs_flat = tf.reshape(obs_expanded, [-1, 3])
+
+    #compute H true
+    observers_rel_true = obs_flat - positions_true_rep
+    H_true = magnet_field_tf.compute_H_field_batch(observers_rel_true, dimensions_true_rep, polarizations_true_rep)
+    H_true = tf.reshape(H_true, [batch_size, n_points, 3])
+
+    #normalise, clip
+    H_true_normalized = H_true / Dataset.H_STD
+    H_true_normalized = tf.clip_by_value(H_true_normalized, -100.0, 100.0)
+
+    #---calculate predicted H field---
+    positions_pred = tf.stack([
+        params_pred_denorm[:, 0],
+        params_pred_denorm[:, 1],
+        tf.fill([batch_size], 2.5)
+    ], axis=1)
+
+    dimensions_pred = tf.stack([
+        params_pred_denorm[:, 2],
+        params_pred_denorm[:, 3],
+        tf.ones([batch_size])
+    ], axis=1)
+
+    polarizations_pred = tf.stack([
+        params_pred_denorm[:, 4],
+        params_pred_denorm[:, 5],
+        tf.zeros([batch_size])
+    ], axis=1)
+
+    positions_pred_rep = tf.repeat(positions_pred, n_points, axis=0)
+    dimensions_pred_rep = tf.repeat(dimensions_pred, n_points, axis=0)
+    polarizations_pred_rep = tf.repeat(polarizations_pred, n_points, axis=0)
+
+    #calc H pred
+    observers_rel_pred = obs_flat - positions_pred_rep
+    H_pred = magnet_field_tf.compute_H_field_batch(observers_rel_pred, dimensions_pred_rep, polarizations_pred_rep)
+    H_pred = tf.reshape(H_pred, [batch_size, n_points, 3])
+
+    #normalise, clip
+    H_pred_normalized = H_pred / Dataset.H_STD
+    H_pred_normalized = tf.clip_by_value(H_pred_normalized, -100.0, 100.0)
+
+    #---compute losses---
+    #physics loss: MSE between H_true_normalized and H_pred_normalized
+    physics_loss_per_sample = tf.reduce_mean(tf.square(H_true_normalized - H_pred_normalized), axis=[1, 2])
+    physics_loss = tf.reduce_mean(physics_loss_per_sample)
+
+    #parameter loss: MSE between (normalised) parameters
+    param_mse = tf.reduce_mean(tf.square(params_true - params_pred))
+
+    #combine for total loss
+    #ratio chosen so physics and param losses contribute roughly equally
+    total_loss = 0.05 * physics_loss + param_mse
 
     return total_loss
 
-def compile_model(model, initial_lr=0.1):
-    optimizer = optimizers.SGD(
+def compile_model(model, initial_lr):
+    # optimizer = optimizers.SGD(
+    #     learning_rate=initial_lr,
+    #     momentum=config.TRAINING_CONFIG['momentum'],
+    #     weight_decay=1e-4,
+    #     nesterov=True,
+    #     clipnorm=1.0  # Clip gradients to prevent explosion/NaN
+    # )
+
+    optimizer = optimizers.Adam(
         learning_rate=initial_lr,
-        momentum=config.TRAINING_CONFIG['momentum'],
-        weight_decay=1e-4,
-        nesterov=True
+        clipnorm=1.0  #clip gradients to stabilise
     )
 
     model.compile(
@@ -109,31 +168,32 @@ def compile_model(model, initial_lr=0.1):
 def create_callbacks():
     early_stopping = callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=10,
+        patience=15,
         restore_best_weights=True,
         verbose=1
     )
 
     csv_logger = callbacks.CSVLogger('training_history.csv', append=True)
 
-    return [early_stopping, csv_logger]
+    #ReduceLROnPlateau --> adaptive learning rate
+    reduce_lr = callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=1e-7,
+        verbose=1
+    )
 
-def train_model(model, train_dataset, val_dataset, initial_lr=0.1):
-    """
-    Train the model using tf.data.Dataset objects loaded from GCS
+    #terminate training if loss - NaN
+    terminate_nan = callbacks.TerminateOnNaN()
 
-    Args:
-        model: Keras model to train
-        train_dataset: tf.data.Dataset for training (already batched and preprocessed)
-        val_dataset: tf.data.Dataset for validation (already batched and preprocessed)
-        initial_lr: Initial learning rate
-        steps_per_epoch: Number of batches per epoch (optional)
-        validation_steps: Number of validation batches (optional)
-    """
-    #calc steps for terminal progress bar display
-    steps_per_epoch = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['train_split']) // \
+    return [early_stopping, csv_logger, reduce_lr, terminate_nan]
+
+def train_model(model, train_dataset, val_dataset, initial_lr=0.1, prop_to_load=1.0):
+    #calc steps for terminal progress bar display, adjusted for actual data loaded
+    steps_per_epoch = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['train_split'] * prop_to_load) // \
                       config.TRAINING_CONFIG['batch_size']
-    validation_steps = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['val_split']) // \
+    validation_steps = int(config.DATASET_CONFIG['dataset_size'] * config.DATASET_CONFIG['val_split'] * prop_to_load) // \
                        config.TRAINING_CONFIG['batch_size']
 
     #compile, create callbacks
@@ -154,7 +214,7 @@ def train_model(model, train_dataset, val_dataset, initial_lr=0.1):
     )
     print("Model trained")
 
-    # Save trained model
+    #save trained model
     model_path = f'{config.MODEL_DIR}/trained_model.keras'
     model.save(model_path)
     print(f"Model saved to {model_path}")

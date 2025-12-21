@@ -6,15 +6,19 @@ import tensorflow as tf
 import numpy as np
 from data import Dataset
 import config
+import model as Model  #for custom loss
 
 
 #load model
 print("\n\n---Loading model and test dataset---")
-model_name = "model1.keras"
-model = tf.keras.models.load_model(f"models/{model_name}")
+model_name = "trained_model.keras"
+model = tf.keras.models.load_model(
+    f"models/{model_name}",
+    custom_objects={'custom_loss': Model.custom_loss}
+)
 print("Model loaded")
 
-#load test dataset from GCS
+#load test dataset
 dataset = Dataset()
 test_dataset = dataset.load_split_datasets(split='test')
 print("Dataset loaded")

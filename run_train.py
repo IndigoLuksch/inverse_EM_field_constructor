@@ -41,13 +41,15 @@ print('Generating data')
 generator = data.Dataset()
 generator.setup_gcloud()
 generator.generate_cubiod_data()
+'''
 
 #---load datasets---
 print('---Loading datasets---')
+prop_to_load = 1.0 #proportion of datasets to load
 dataset_loader = data.Dataset()
 
-train_dataset = dataset_loader.load_split_datasets(split='train')
-val_dataset = dataset_loader.load_split_datasets(split='val')
+train_dataset = dataset_loader.load_split_datasets(split='train', prop_to_load=prop_to_load)
+val_dataset = dataset_loader.load_split_datasets(split='val', prop_to_load=prop_to_load)
 print('Complete\n\n')
 
 #---create and train model---
@@ -57,7 +59,7 @@ print('Complete\n\n')
 
 print('---Training model---')
 
-history = Model.train_model(model, train_dataset, val_dataset, initial_lr=config.TRAINING_CONFIG['initial_lr'])
+history = Model.train_model(model, train_dataset, val_dataset, initial_lr=config.TRAINING_CONFIG['initial_lr'], prop_to_load=prop_to_load)
 print('Complete\n\n')
 
 print("Script complete")
